@@ -39,7 +39,7 @@ const DEMO_POLLS: Poll[] = [
   },
 ];
 
-const CONTRACT_ID = 'YOUR_CONTRACT_ID_HERE';
+const CONTRACT_ID = 'CDJOWG6WXISZO35N7SFCWLNAPLKWK4YVXHVWLRDKA63ZF3CNF2WVYXD2';
 
 export default function App() {
   const { address, walletType, isConnecting, error: walletError, connect, disconnect, clearError } = useWallet();
