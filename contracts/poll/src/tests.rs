@@ -21,9 +21,8 @@ fn test_create_and_vote() {
         String::from_str(&env, "Albedo"),
         String::from_str(&env, "xBull"),
     ];
-    let duration: u64 = 86400 * 7;
 
-    let poll_id = client.create_poll(&creator, &question, &options, &duration);
+    let poll_id = client.create_poll(&creator, &question, &options, &(86400 * 7));
 
     let poll = client.get_poll(&poll_id);
     assert_eq!(poll.question, question);
@@ -93,34 +92,4 @@ fn test_invalid_option() {
     );
 
     client.vote(&voter, &poll_id, &5);
-}
-
-#[test]
-fn test_voter_polls() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, PollContract);
-    let client = PollContractClient::new(&env, &contract_id);
-
-    let creator = Address::generate(&env);
-    let voter = Address::generate(&env);
-    env.mock_all_auths();
-
-    let poll1 = client.create_poll(
-        &creator,
-        &String::from_str(&env, "Q1"),
-        &vec![&env, String::from_str(&env, "A"), String::from_str(&env, "B")],
-        &86400,
-    );
-    let poll2 = client.create_poll(
-        &creator,
-        &String::from_str(&env, "Q2"),
-        &vec![&env, String::from_str(&env, "A"), String::from_str(&env, "B")],
-        &86400,
-    );
-
-    client.vote(&voter, &poll1, &0);
-    client.vote(&voter, &poll2, &1);
-
-    let voter_polls = client.get_voter_polls(&voter);
-    assert_eq!(voter_polls.len(), 2);
 }

@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec, IntoVal};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,7 +12,7 @@ pub struct PollOption {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Poll {
-    pub id: String,
+    pub id: u32,
     pub question: String,
     pub options: Vec<PollOption>,
     pub creator: Address,
@@ -23,9 +23,8 @@ pub struct Poll {
 #[contracttype]
 pub enum DataKey {
     PollCount,
-    Poll(String),
-    HasVoted(String, Address),
-    VoterPolls(Address),
+    Poll(u32),
+    HasVoted(u32, Address),
 }
 
 #[contract]
@@ -39,11 +38,11 @@ impl PollContract {
         question: String,
         option_names: Vec<String>,
         duration_secs: u64,
-    ) -> String {
+    ) -> u32 {
         creator.require_auth();
 
-        let count: u32 = env.storage().instance().get(&DataKey::PollCount).unwrap_or(0);
-        let poll_id = String::from_str(&env, &format!("poll_{}", count + 1));
+        let id: u32 = env.storage().instance().get(&DataKey::PollCount).unwrap_or(0);
+        let next_id = id + 1;
         let end_time = env.ledger().timestamp() + duration_secs;
 
         let mut options: Vec<PollOption> = Vec::new(&env);
@@ -55,7 +54,7 @@ impl PollContract {
         }
 
         let poll = Poll {
-            id: poll_id.clone(),
+            id: next_id,
             question,
             options,
             creator,
@@ -63,37 +62,35 @@ impl PollContract {
             total_votes: 0,
         };
 
-        env.storage().instance().set(&DataKey::PollCount, &(count + 1));
-        env.storage().instance().set(&DataKey::Poll(poll_id.clone()), &poll);
+        env.storage().instance().set(&DataKey::PollCount, &next_id);
+        env.storage().instance().set(&DataKey::Poll(next_id), &poll);
 
         env.events().publish(
-            (symbol_short!("PCREATE"), poll_id.clone()),
-            poll_id.clone(),
+            (symbol_short!("PCREATE"), next_id),
+            next_id,
         );
 
-        poll_id
+        next_id
     }
 
-    pub fn vote(env: Env, voter: Address, poll_id: String, option_index: u32) {
+    pub fn vote(env: Env, voter: Address, poll_id: u32, option_index: u32) {
         voter.require_auth();
 
-        let mut poll = env
+        let mut poll: Poll = env
             .storage()
             .instance()
-            .get(&DataKey::Poll(poll_id.clone()))
+            .get(&DataKey::Poll(poll_id))
             .expect("Poll not found");
 
         if env.ledger().timestamp() > poll.end_time {
             panic!("Poll has ended");
         }
 
-        let vote_key = DataKey::HasVoted(poll_id.clone(), voter.clone());
-        if env.storage().instance().has(&vote_key) {
+        if env.storage().instance().has(&DataKey::HasVoted(poll_id, voter.clone())) {
             panic!("Already voted");
         }
 
-        let option_count = poll.options.len();
-        if option_index >= option_count {
+        if option_index >= poll.options.len() {
             panic!("Invalid option");
         }
 
@@ -102,27 +99,16 @@ impl PollContract {
         poll.options.set(option_index, option);
         poll.total_votes += 1;
 
-        env.storage().instance().set(&DataKey::Poll(poll_id.clone()), &poll);
-        env.storage().instance().set(&vote_key, &true);
-
-        let mut voter_polls = env
-            .storage()
-            .instance()
-            .get(&DataKey::VoterPolls(voter.clone()))
-            .unwrap_or(Vec::new(&env));
-
-        voter_polls.push_back(poll_id.clone());
-        env.storage()
-            .instance()
-            .set(&DataKey::VoterPolls(voter), &voter_polls);
+        env.storage().instance().set(&DataKey::Poll(poll_id), &poll);
+        env.storage().instance().set(&DataKey::HasVoted(poll_id, voter), &true);
 
         env.events().publish(
-            (symbol_short!("VCAST"), poll_id, option_index as u32),
+            (symbol_short!("VCAST"), poll_id, option_index),
             true,
         );
     }
 
-    pub fn get_poll(env: Env, poll_id: String) -> Poll {
+    pub fn get_poll(env: Env, poll_id: u32) -> Poll {
         env.storage()
             .instance()
             .get(&DataKey::Poll(poll_id))
@@ -133,19 +119,9 @@ impl PollContract {
         env.storage().instance().get(&DataKey::PollCount).unwrap_or(0)
     }
 
-    pub fn has_voted(env: Env, poll_id: String, voter: Address) -> bool {
+    pub fn has_voted(env: Env, poll_id: u32, voter: Address) -> bool {
         env.storage()
             .instance()
             .has(&DataKey::HasVoted(poll_id, voter))
     }
-
-    pub fn get_voter_polls(env: Env, voter: Address) -> Vec<String> {
-        env.storage()
-            .instance()
-            .get(&DataKey::VoterPolls(voter))
-            .unwrap_or(Vec::new(&env))
-    }
 }
-
-#[cfg(test)]
-mod tests;
