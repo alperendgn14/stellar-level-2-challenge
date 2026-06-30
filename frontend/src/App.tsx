@@ -1,7 +1,14 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useWallet } from './hooks/useWallet';
 import { getWalletError } from './utils/wallet';
-import { pollTransactionStatus } from './utils/contract';
+import {
+  fetchAllPolls,
+  fetchPoll,
+  createPollContract,
+  voteContract,
+  checkHasVoted,
+  pollTransactionStatus,
+} from './utils/contract';
 import WalletConnect from './components/WalletConnect';
 import CreatePoll from './components/CreatePoll';
 import PollCard from './components/PollCard';
@@ -9,44 +16,58 @@ import TransactionStatusBar from './components/TransactionStatus';
 import ErrorBanner from './components/ErrorBanner';
 import type { WalletType, Poll, TransactionStatus as TxStatus } from './types';
 
-const DEMO_POLLS: Poll[] = [
-  {
-    id: 'demo1',
-    question: 'Which blockchain will dominate in 2026?',
-    options: [
-      { name: 'Stellar', count: 42 },
-      { name: 'Ethereum', count: 28 },
-      { name: 'Solana', count: 18 },
-      { name: 'Other', count: 12 },
-    ],
-    creator: 'GDEMO...0001',
-    endTime: Date.now() + 86400000 * 7,
-    totalVotes: 100,
-  },
-  {
-    id: 'demo2',
-    question: 'What is the best programming language for smart contracts?',
-    options: [
-      { name: 'Rust', count: 35 },
-      { name: 'Solidity', count: 30 },
-      { name: 'Soroban SDK', count: 25 },
-      { name: 'Python', count: 10 },
-    ],
-    creator: 'GDEMO...0002',
-    endTime: Date.now() + 86400000 * 3,
-    totalVotes: 100,
-  },
-];
-
 const CONTRACT_ID = 'CDJOWG6WXISZO35N7SFCWLNAPLKWK4YVXHVWLRDKA63ZF3CNF2WVYXD2';
 
 export default function App() {
   const { address, walletType, isConnecting, error: walletError, connect, disconnect, clearError } = useWallet();
-  const [polls, setPolls] = useState<Poll[]>(DEMO_POLLS);
+  const [polls, setPolls] = useState<Poll[]>([]);
   const [transactions, setTransactions] = useState<TxStatus[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [isVoting, setIsVoting] = useState<string | null>(null);
-  const [votedPolls, setVotedPolls] = useState<Set<string>>(new Set());
+  const [votedByAddress, setVotedByAddress] = useState<Record<string, Set<string>>>({});
+  const [loadingPolls, setLoadingPolls] = useState(true);
+  const prevAddressRef = useRef<string | null>(null);
+
+  // Load polls from contract on mount
+  useEffect(() => {
+    setLoadingPolls(true);
+    fetchAllPolls(CONTRACT_ID)
+      .then((contractPolls) => {
+        setPolls(contractPolls);
+        setLoadingPolls(false);
+      })
+      .catch(() => setLoadingPolls(false));
+  }, []);
+
+  // When address changes, load their vote state from contract
+  useEffect(() => {
+    if (!address) return;
+    if (prevAddressRef.current === address) return;
+    prevAddressRef.current = address;
+
+    const loadVotes = async () => {
+      const count = polls.length;
+      const voted = new Set<string>();
+      for (let i = 1; i <= count; i++) {
+        try {
+          const has = await checkHasVoted(CONTRACT_ID, i, address);
+          if (has) voted.add(String(i));
+        } catch { /* ignore */ }
+      }
+      setVotedByAddress((prev) => ({ ...prev, [address]: voted }));
+    };
+    loadVotes();
+  }, [address, polls.length]);
+
+  // Refresh single poll after a vote
+  const refreshPoll = useCallback(async (pollId: string) => {
+    const id = parseInt(pollId, 10);
+    if (isNaN(id)) return;
+    const updated = await fetchPoll(CONTRACT_ID, id);
+    if (updated) {
+      setPolls((prev) => prev.map((p) => (p.id === pollId ? updated : p)));
+    }
+  }, []);
 
   const handleConnect = useCallback(async (type: WalletType) => {
     await connect(type);
@@ -54,13 +75,13 @@ export default function App() {
 
   const handleDisconnect = useCallback(() => {
     disconnect();
+    prevAddressRef.current = null;
   }, [disconnect]);
 
   const addTransaction = useCallback((hash: string, status: TxStatus['status'], message: string) => {
     const tx: TxStatus = { hash, status, message, timestamp: Date.now() };
     setTransactions((prev) => [tx, ...prev].slice(0, 5));
 
-    // Auto-dismiss after 8s for non-pending
     if (status !== 'pending') {
       setTimeout(() => {
         setTransactions((prev) => prev.filter((t) => t.hash !== hash));
@@ -87,58 +108,57 @@ export default function App() {
     setTransactions((prev) => prev.filter((t) => t.hash !== hash));
   }, []);
 
+  const hasVoted = useCallback((pollId: string): boolean => {
+    if (!address) return false;
+    return votedByAddress[address]?.has(pollId) ?? false;
+  }, [address, votedByAddress]);
+
   const handleCreatePoll = useCallback(async (question: string, options: string[]) => {
+    if (!address || walletType !== 'freighter') {
+      addTransaction('err-' + Date.now(), 'failed', 'Only Freighter wallet can create polls on-chain.');
+      return;
+    }
     setIsCreating(true);
-    const txHash = 'demo-' + Date.now();
+    const txHash = await createPollContract(address, CONTRACT_ID, question, options);
     addTransaction(txHash, 'pending', `Creating poll: "${question.slice(0, 30)}..."`);
-
-    await new Promise((r) => setTimeout(r, 1500));
-
-    addTransaction(txHash, 'success', `Poll created: "${question.slice(0, 30)}..."`);
-    const newPoll: Poll = {
-      id: 'poll-' + Date.now(),
-      question,
-      options: options.map((name) => ({ name, count: 0 })),
-      creator: address || 'Unknown',
-      endTime: Date.now() + 86400000 * 7,
-      totalVotes: 0,
-    };
-    setPolls((prev) => [newPoll, ...prev]);
     setIsCreating(false);
-  }, [address, addTransaction]);
+
+    setTimeout(async () => {
+      const newPolls = await fetchAllPolls(CONTRACT_ID);
+      setPolls(newPolls);
+    }, 5000);
+  }, [address, walletType, addTransaction]);
 
   const handleVote = useCallback(async (pollId: string, optionIndex: number) => {
-    if (votedPolls.has(pollId)) return;
-    if (!address) return;
+    if (!address || walletType !== 'freighter') {
+      addTransaction('err-' + Date.now(), 'failed', 'Only Freighter wallet can vote on-chain.');
+      return;
+    }
+    if (hasVoted(pollId)) return;
 
     setIsVoting(pollId);
+    const numId = parseInt(pollId, 10);
 
     try {
-      const txHash = 'vote-' + Date.now();
-      addTransaction(txHash, 'pending', `Voting on poll...`);
+      const txHash = await voteContract(address, CONTRACT_ID, numId, optionIndex);
+      addTransaction(txHash, 'pending', `Casting vote...`);
 
-      // Simulate contract call
-      await new Promise((r) => setTimeout(r, 2000));
+      // Mark as voted locally immediately
+      setVotedByAddress((prev) => {
+        const s = new Set(prev[address] || []);
+        s.add(pollId);
+        return { ...prev, [address]: s };
+      });
 
-      setPolls((prev) =>
-        prev.map((poll) => {
-          if (poll.id !== pollId) return poll;
-          const newOptions = poll.options.map((opt, i) =>
-            i === optionIndex ? { ...opt, count: opt.count + 1 } : opt
-          );
-          return { ...poll, options: newOptions, totalVotes: poll.totalVotes + 1 };
-        })
-      );
-
-      setVotedPolls((prev) => new Set(prev).add(pollId));
-      addTransaction(txHash, 'success', `Voted successfully!`);
+      // Refresh poll data after a delay
+      setTimeout(() => refreshPoll(pollId), 5000);
     } catch (err) {
       const e = getWalletError(err);
       addTransaction('err-' + Date.now(), 'failed', e.message);
     } finally {
       setIsVoting(null);
     }
-  }, [address, votedPolls, addTransaction]);
+  }, [address, walletType, hasVoted, addTransaction, refreshPoll]);
 
   const totalVotes = polls.reduce((sum, p) => sum + p.totalVotes, 0);
 
@@ -195,15 +215,29 @@ export default function App() {
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <ErrorBanner error={walletError} onDismiss={clearError} />
 
+        {walletType && walletType !== 'freighter' && (
+          <div className="bg-amber-900/20 border border-amber-500/30 rounded-xl p-3 mb-4 text-sm text-amber-300">
+            ⚠ Creating polls and voting requires Freighter wallet. Albedo/xBull can view polls only.
+          </div>
+        )}
+
         {/* Create Poll Section */}
-        {address && (
+        {address && walletType === 'freighter' && (
           <div className="mb-8">
             <CreatePoll onCreate={handleCreatePoll} isCreating={isCreating} />
           </div>
         )}
 
         {/* Polls Grid */}
-        {polls.length > 0 ? (
+        {loadingPolls ? (
+          <div className="text-center py-20">
+            <svg className="animate-spin h-8 w-8 text-stellar-light mx-auto mb-4" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <p className="text-text-muted">Loading polls from contract...</p>
+          </div>
+        ) : polls.length > 0 ? (
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Active Polls</h2>
@@ -216,7 +250,7 @@ export default function App() {
                   poll={poll}
                   onVote={handleVote}
                   isVoting={isVoting}
-                  hasVoted={votedPolls.has(poll.id)}
+                  hasVoted={hasVoted(poll.id)}
                 />
               ))}
             </div>
@@ -224,7 +258,7 @@ export default function App() {
         ) : (
           <div className="text-center py-20">
             <div className="text-5xl mb-4">📊</div>
-            <p className="text-text-muted">No polls yet. Be the first to create one!</p>
+            <p className="text-text-muted">No polls yet on the contract. Create one with Freighter!</p>
           </div>
         )}
       </main>
@@ -236,11 +270,9 @@ export default function App() {
       <footer className="border-t border-border mt-12 py-6">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 text-center text-xs text-text-muted">
           <p>Built with Stellar + Soroban • Level 2 Challenge</p>
-          {address && (
-            <p className="mt-1">
-              Connected: <span className="font-mono text-stellar-light">{address}</span>
-            </p>
-          )}
+          <p className="mt-1">
+            Contract: <span className="font-mono text-stellar-light">{CONTRACT_ID.slice(0, 8)}...</span>
+          </p>
         </div>
       </footer>
     </div>
