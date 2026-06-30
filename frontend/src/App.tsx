@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useWallet } from './hooks/useWallet';
-import { kit } from './utils/wallet';
 import { getWalletError } from './utils/wallet';
 import { pollTransactionStatus } from './utils/contract';
 import WalletConnect from './components/WalletConnect';

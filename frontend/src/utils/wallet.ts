@@ -1,19 +1,5 @@
-import { StellarWalletsKit, Networks } from '@creit.tech/stellar-wallets-kit';
-import { FreighterModule } from '@creit.tech/stellar-wallets-kit/modules/freighter';
-import { AlbedoModule } from '@creit.tech/stellar-wallets-kit/modules/albedo';
-import { xBullModule } from '@creit.tech/stellar-wallets-kit/modules/xbull';
+import { isConnected, requestAccess, getAddress as freighterGetAddress } from '@stellar/freighter-api';
 import type { WalletType, WalletError } from '../types';
-
-export const kit = StellarWalletsKit;
-
-kit.init({
-  modules: [
-    new FreighterModule(),
-    new AlbedoModule(),
-    new xBullModule(),
-  ],
-  network: Networks.TESTNET,
-});
 
 export const walletIcons: Record<WalletType, string> = {
   freighter: '🪐',
@@ -27,14 +13,78 @@ export const walletNames: Record<WalletType, string> = {
   xbull: 'xBull',
 };
 
-export const walletProductIds: Record<WalletType, string> = {
-  freighter: 'freighter',
-  albedo: 'albedo',
-  xbull: 'xbull',
-};
+async function connectFreighter(): Promise<string> {
+  const connected = await isConnected();
+  if (!connected.isConnected) {
+    throw { type: 'wallet_not_found', message: 'Freighter not found. Please install the Freighter extension.' };
+  }
+  const access = await requestAccess();
+  if (access.error) {
+    throw { type: 'rejected', message: access.error };
+  }
+  const { address, error } = await freighterGetAddress();
+  if (error || !address) {
+    throw { type: 'rejected', message: error || 'Could not get address from Freighter.' };
+  }
+  return address;
+}
+
+async function connectAlbedo(): Promise<string> {
+  try {
+    const res = await fetch('https://albedo.link/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    if (data.error) throw { type: 'rejected', message: data.error };
+    if (!data.publicKey) throw { type: 'wallet_not_found', message: 'Albedo wallet not available.' };
+    return data.publicKey;
+  } catch (err: any) {
+    if (err?.type) throw err;
+    if (String(err).includes('Failed to fetch')) {
+      throw { type: 'wallet_not_found', message: 'Albedo not found. Please install the Albedo extension.' };
+    }
+    throw { type: 'rejected', message: String(err) };
+  }
+}
+
+async function connectXbull(): Promise<string> {
+  try {
+    const res = await fetch('https://xbull.app/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    if (data.error) throw { type: 'rejected', message: data.error };
+    if (!data.publicKey) throw { type: 'wallet_not_found', message: 'xBull wallet not available.' };
+    return data.publicKey;
+  } catch (err: any) {
+    if (err?.type) throw err;
+    if (String(err).includes('Failed to fetch')) {
+      throw { type: 'wallet_not_found', message: 'xBull not found. Please install the xBull extension.' };
+    }
+    throw { type: 'rejected', message: String(err) };
+  }
+}
+
+export async function connectWallet(type: WalletType): Promise<string> {
+  switch (type) {
+    case 'freighter': return connectFreighter();
+    case 'albedo': return connectAlbedo();
+    case 'xbull': return connectXbull();
+  }
+}
 
 export function getWalletError(error: unknown): WalletError {
-  const msg = String(error);
+  const err = error as any;
+
+  if (err?.type && err?.message) {
+    return { type: err.type, message: err.message };
+  }
+
+  const msg = err?.message || err?.msg || String(error);
 
   if (msg.includes('not found') || msg.includes('not installed') || msg.includes('Please install') || msg.includes('is not connected')) {
     return { type: 'wallet_not_found', message: 'Wallet not found. Please install the wallet extension and refresh.' };

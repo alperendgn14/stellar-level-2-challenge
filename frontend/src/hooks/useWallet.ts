@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { kit, getWalletError, walletProductIds } from '../utils/wallet';
+import { connectWallet, getWalletError } from '../utils/wallet';
 import type { WalletType, WalletError } from '../types';
 
 export function useWallet() {
@@ -12,23 +12,13 @@ export function useWallet() {
     setIsConnecting(true);
     setError(null);
     try {
-      kit.setWallet(walletProductIds[type]);
-
-      let pubKey: string;
-      try {
-        const result = await kit.getAddress();
-        pubKey = result.address;
-      } catch (err) {
-        throw getWalletError(err);
-      }
-
+      const pubKey = await connectWallet(type);
       setAddress(pubKey);
       setWalletType(type);
       localStorage.setItem('walletType', type);
       localStorage.setItem('walletAddress', pubKey);
     } catch (err) {
-      const walletError = err as WalletError;
-      setError(walletError);
+      setError(getWalletError(err));
     } finally {
       setIsConnecting(false);
     }
