@@ -60,6 +60,14 @@ export default function App() {
   const addTransaction = useCallback((hash: string, status: TxStatus['status'], message: string) => {
     const tx: TxStatus = { hash, status, message, timestamp: Date.now() };
     setTransactions((prev) => [tx, ...prev].slice(0, 5));
+
+    // Auto-dismiss after 8s for non-pending
+    if (status !== 'pending') {
+      setTimeout(() => {
+        setTransactions((prev) => prev.filter((t) => t.hash !== hash));
+      }, 8000);
+    }
+
     if (status === 'pending') {
       const interval = setInterval(async () => {
         const newStatus = await pollTransactionStatus(hash);
@@ -68,6 +76,9 @@ export default function App() {
           setTransactions((prev) =>
             prev.map((t) => (t.hash === hash ? { ...t, status: newStatus } : t))
           );
+          setTimeout(() => {
+            setTransactions((prev) => prev.filter((t) => t.hash !== hash));
+          }, 8000);
         }
       }, 3000);
     }
@@ -80,6 +91,10 @@ export default function App() {
   const handleCreatePoll = useCallback(async (question: string, options: string[]) => {
     setIsCreating(true);
     const txHash = 'demo-' + Date.now();
+    addTransaction(txHash, 'pending', `Creating poll: "${question.slice(0, 30)}..."`);
+
+    await new Promise((r) => setTimeout(r, 1500));
+
     addTransaction(txHash, 'success', `Poll created: "${question.slice(0, 30)}..."`);
     const newPoll: Poll = {
       id: 'poll-' + Date.now(),

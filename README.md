@@ -129,6 +129,7 @@ The app handles three error types:
 
 ## Submission Info
 
+- **GitHub Repository**: https://github.com/alperendgn14/stellar-level-2-challenge
 - **Deployed Contract Address**: `<YOUR_CONTRACT_ID>`
 - **Transaction Hash**: `<TX_HASH_OF_CONTRACT_CALL>`
 - **Live Demo**: `<YOUR_VERCEL_URL>`
