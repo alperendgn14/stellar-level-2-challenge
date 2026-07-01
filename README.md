@@ -133,7 +133,7 @@ The app handles three error types:
 - **Deployed Contract Address**: `CDJOWG6WXISZO35N7SFCWLNAPLKWK4YVXHVWLRDKA63ZF3CNF2WVYXD2`
 - **Transaction Hash**: `1085e36b48c2612ce587ac1f2d53817d8c91e7f8f811399733081406dfd6ed5b`
 - **Stellar Expert**: https://stellar.expert/explorer/testnet/contract/CDJOWG6WXISZO35N7SFCWLNAPLKWK4YVXHVWLRDKA63ZF3CNF2WVYXD2
-- **Live Demo**: `<YOUR_VERCEL_URL>`
+- **Live Demo**: `https://alperendgn14.github.io/stellar-level-2-challenge/`
 
 ## License
 
