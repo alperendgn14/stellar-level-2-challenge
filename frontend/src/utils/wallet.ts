@@ -29,6 +29,18 @@ async function connectFreighter(): Promise<string> {
   return address;
 }
 
+export async function getCurrentFreighterAddress(): Promise<string | null> {
+  try {
+    const connected = await isConnected();
+    if (!connected.isConnected) return null;
+    const { address, error } = await freighterGetAddress();
+    if (error || !address) return null;
+    return address;
+  } catch {
+    return null;
+  }
+}
+
 async function connectAlbedo(): Promise<string> {
   try {
     const res = await fetch('https://albedo.link/connect', {

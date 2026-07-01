@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { connectWallet, getWalletError } from '../utils/wallet';
+import { useState, useCallback, useEffect } from 'react';
+import { connectWallet, getWalletError, getCurrentFreighterAddress } from '../utils/wallet';
 import type { WalletType, WalletError } from '../types';
 
 export function useWallet() {
@@ -35,6 +35,27 @@ export function useWallet() {
   const clearError = useCallback(() => {
     setError(null);
   }, []);
+
+  // Sync wallet address periodically and on window focus
+  useEffect(() => {
+    const sync = async () => {
+      if (walletType === 'freighter' && address) {
+        const currentAddr = await getCurrentFreighterAddress();
+        if (currentAddr && currentAddr !== address) {
+          setAddress(currentAddr);
+          localStorage.setItem('walletAddress', currentAddr);
+        }
+      }
+    };
+
+    const interval = setInterval(sync, 2000);
+    window.addEventListener('focus', sync);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', sync);
+    };
+  }, [walletType, address]);
 
   return {
     address,
