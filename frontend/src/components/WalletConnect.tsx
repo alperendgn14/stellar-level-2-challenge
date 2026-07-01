@@ -20,6 +20,8 @@ export default function WalletConnect({ onConnect, onDisconnect, address, wallet
     `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
   if (address) {
+    const otherWallets = wallets.filter((w) => w !== walletType);
+
     return (
       <div className="relative">
         <button
@@ -37,20 +39,45 @@ export default function WalletConnect({ onConnect, onDisconnect, address, wallet
         {showDropdown && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setShowDropdown(false)} />
-            <div className="absolute right-0 mt-2 w-64 bg-surface-light border border-border rounded-xl shadow-2xl z-20 p-3">
-              <div className="text-xs text-text-muted mb-2 px-2">Connected as</div>
-              <div className="px-2 py-1.5 bg-surface-lighter rounded-lg mb-3">
-                <p className="text-xs font-mono break-all">{address}</p>
+            <div className="absolute right-0 mt-2 w-64 bg-surface-light border border-border rounded-xl shadow-2xl z-20 overflow-hidden">
+              {/* Connected info */}
+              <div className="p-3 border-b border-border">
+                <div className="text-xs text-text-muted mb-1.5">Connected with {walletType ? walletNames[walletType] : 'Unknown'}</div>
+                <div className="px-2.5 py-1.5 bg-surface-lighter rounded-lg">
+                  <p className="text-xs font-mono break-all">{address}</p>
+                </div>
               </div>
-              <button
-                onClick={() => { onDisconnect(); setShowDropdown(false); }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-error hover:bg-error/10 rounded-lg transition-colors cursor-pointer"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-                Disconnect
-              </button>
+
+              {/* Switch wallet */}
+              {otherWallets.length > 0 && (
+                <div className="p-2 border-b border-border">
+                  <div className="text-[10px] text-text-muted uppercase tracking-wider px-2 py-1">Switch Wallet</div>
+                  {otherWallets.map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => { onConnect(type); setShowDropdown(false); }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-surface-lighter
+                                 transition-colors cursor-pointer group"
+                    >
+                      <span className="text-lg">{walletIcons[type]}</span>
+                      <span className="group-hover:text-stellar-light transition-colors">{walletNames[type]}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Disconnect */}
+              <div className="p-2">
+                <button
+                  onClick={() => { onDisconnect(); setShowDropdown(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-error hover:bg-error/10 rounded-lg transition-colors cursor-pointer"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                  Disconnect
+                </button>
+              </div>
             </div>
           </>
         )}
