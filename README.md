@@ -127,6 +127,10 @@ The app handles three error types:
 2. **Rejected** - When the user rejects the connection request
 3. **Insufficient Balance** - When the account lacks funds for a transaction
 
+## Screenshots
+ 
+![Multiple Wallet Options](./screenshots/1.png)
+ 
 ## Submission Info
 
 - **GitHub Repository**: https://github.com/alperendgn14/stellar-level-2-challenge
