@@ -1,6 +1,7 @@
 import {
   rpc,
   Contract,
+  Transaction,
   nativeToScVal,
   scValToNative,
   BASE_FEE,
@@ -33,7 +34,7 @@ function scvAddress(addr: string) {
 }
 
 function scvVecStrings(arr: string[]) {
-  return nativeToScVal(arr, { type: 'vec' });
+  return xdr.ScVal.scvVec(arr.map(s => xdr.ScVal.scvString(s)));
 }
 
 function pollFromScVals(id: number, retval: any): Poll {
@@ -50,79 +51,94 @@ function pollFromScVals(id: number, retval: any): Poll {
   };
 }
 
-export async function fetchPollCount(contractId: string): Promise<number> {
+export async function fetchPollCount(contractId: string, source?: string): Promise<number> {
   try {
     const contract = new Contract(contractId);
-    const account = await server.getAccount(contractId);
-    const tx = new TransactionBuilder(account, {
+    const simulationAccount = source 
+      ? await server.getAccount(source)
+      : { accountId: 'GDZ6C3S7MBB6TID7X4C3FUKH3C6LZV7A4T3QSBVQD5T2DJK7ZSQUKN5W', sequence: 0 };
+    const tx = new TransactionBuilder(simulationAccount, {
       fee: BASE_FEE,
       networkPassphrase: NETWORK_PASSPHRASE,
     })
       .addOperation(contract.call('get_poll_count'))
       .setTimeout(30)
       .build();
-
+ 
     const result = await server.simulateTransaction(tx);
     if (rpc.Api.isSimulationSuccess(result) && result.result?.retval) {
       return scValToNative(result.result.retval) as number;
     }
+    console.warn('Simulation failed for fetchPollCount');
     return 0;
-  } catch {
+  } catch (err) {
+    console.error('Error in fetchPollCount:', err);
     return 0;
   }
 }
 
-export async function fetchPoll(contractId: string, pollId: number): Promise<Poll | null> {
+export async function fetchPoll(contractId: string, pollId: number, source?: string): Promise<Poll | null> {
   try {
     const contract = new Contract(contractId);
-    const account = await server.getAccount(contractId);
-    const tx = new TransactionBuilder(account, {
+    const simulationAccount = source 
+      ? await server.getAccount(source)
+      : { accountId: 'GDZ6C3S7MBB6TID7X4C3FUKH3C6LZV7A4T3QSBVQD5T2DJK7ZSQUKN5W', sequence: 0 };
+    const tx = new TransactionBuilder(simulationAccount, {
       fee: BASE_FEE,
       networkPassphrase: NETWORK_PASSPHRASE,
     })
       .addOperation(contract.call('get_poll', scvU32(pollId)))
       .setTimeout(30)
       .build();
-
+ 
     const result = await server.simulateTransaction(tx);
     if (rpc.Api.isSimulationSuccess(result) && result.result?.retval) {
       const val = scValToNative(result.result.retval);
       return pollFromScVals(pollId, val);
     }
     return null;
-  } catch {
+  } catch (err) {
+    console.error('Error in fetchPoll:', err);
     return null;
   }
 }
 
-export async function fetchAllPolls(contractId: string): Promise<Poll[]> {
-  const count = await fetchPollCount(contractId);
-  const polls: Poll[] = [];
-  for (let i = 1; i <= count; i++) {
-    const poll = await fetchPoll(contractId, i);
-    if (poll) polls.push(poll);
+export async function fetchAllPolls(contractId: string, source?: string): Promise<Poll[]> {
+  try {
+    const count = await fetchPollCount(contractId, source);
+    const polls: Poll[] = [];
+    for (let i = 1; i <= count; i++) {
+      const poll = await fetchPoll(contractId, i, source);
+      if (poll) polls.push(poll);
+    }
+    return polls;
+  } catch (err) {
+    console.error('Error in fetchAllPolls:', err);
+    return [];
   }
-  return polls;
 }
 
-export async function checkHasVoted(contractId: string, pollId: number, voter: string): Promise<boolean> {
+export async function checkHasVoted(contractId: string, pollId: number, voter: string, source?: string): Promise<boolean> {
   try {
     const contract = new Contract(contractId);
-    const account = await server.getAccount(contractId);
-    const tx = new TransactionBuilder(account, {
+    const simulationAccount = source 
+      ? await server.getAccount(source)
+      : { accountId: 'GDZ6C3S7MBB6TID7X4C3FUKH3C6LZV7A4T3QSBVQD5T2DJK7ZSQUKN5W', sequence: 0 };
+    const tx = new TransactionBuilder(simulationAccount, {
       fee: BASE_FEE,
       networkPassphrase: NETWORK_PASSPHRASE,
     })
       .addOperation(contract.call('has_voted', scvU32(pollId), scvAddress(voter)))
       .setTimeout(30)
       .build();
-
+ 
     const result = await server.simulateTransaction(tx);
     if (rpc.Api.isSimulationSuccess(result) && result.result?.retval) {
       return scValToNative(result.result.retval) as boolean;
     }
     return false;
-  } catch {
+  } catch (err) {
+    console.error('Error in checkHasVoted:', err);
     return false;
   }
 }
@@ -156,19 +172,24 @@ export async function createPollContract(
     throw new Error('Simulation failed for create_poll');
   }
 
-  const preparedTx = rpc.assembleTransaction(tx, simResult);
-  const txXdr = preparedTx.toEnvelope().toXDR('base64');
+  try {
+    const preparedTx = rpc.assembleTransaction(tx, simResult);
+    const txXdr = preparedTx.build().toEnvelope().toXDR('base64');
 
-  const signedXdr = await signTransaction(txXdr, {
-    networkPassphrase: NETWORK_PASSPHRASE,
-    address: source,
-  });
+    const signed = await signTransaction(txXdr, {
+      networkPassphrase: NETWORK_PASSPHRASE,
+      address: source,
+    });
+    const signedXdr = typeof signed === 'string' ? signed : (signed as any).signedTxXdr || String(signed);
 
-  const txResult = await server.sendTransaction(signedXdr);
-  if (txResult.status === 'PENDING' || txResult.status === 'DUPLICATE') {
-    return txResult.hash;
+    const txResult = await server.sendTransaction({ toXDR: () => signedXdr } as any);
+    if (txResult.status === 'PENDING' || txResult.status === 'DUPLICATE') {
+      return txResult.hash;
+    }
+    throw new Error(`Transaction failed: ${txResult.status}`);
+  } catch (err: any) {
+    throw new Error(err?.message || err?.msg || String(err));
   }
-  throw new Error(`Transaction failed: ${txResult.status}`);
 }
 
 export async function voteContract(
@@ -198,19 +219,24 @@ export async function voteContract(
     throw new Error('Simulation failed for vote');
   }
 
-  const preparedTx = rpc.assembleTransaction(tx, simResult);
-  const txXdr = preparedTx.toEnvelope().toXDR('base64');
+  try {
+    const preparedTx = rpc.assembleTransaction(tx, simResult);
+    const txXdr = preparedTx.build().toEnvelope().toXDR('base64');
 
-  const signedXdr = await signTransaction(txXdr, {
-    networkPassphrase: NETWORK_PASSPHRASE,
-    address: source,
-  });
+    const signed = await signTransaction(txXdr, {
+      networkPassphrase: NETWORK_PASSPHRASE,
+      address: source,
+    });
+    const signedXdr = typeof signed === 'string' ? signed : (signed as any).signedTxXdr || String(signed);
 
-  const txResult = await server.sendTransaction(signedXdr);
-  if (txResult.status === 'PENDING' || txResult.status === 'DUPLICATE') {
-    return txResult.hash;
+    const txResult = await server.sendTransaction({ toXDR: () => signedXdr } as any);
+    if (txResult.status === 'PENDING' || txResult.status === 'DUPLICATE') {
+      return txResult.hash;
+    }
+    throw new Error(`Transaction failed: ${txResult.status}`);
+  } catch (err: any) {
+    throw new Error(err?.message || err?.msg || String(err));
   }
-  throw new Error(`Transaction failed: ${txResult.status}`);
 }
 
 export async function pollTransactionStatus(hash: string): Promise<'pending' | 'success' | 'failed'> {

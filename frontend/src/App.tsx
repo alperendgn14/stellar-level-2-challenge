@@ -28,16 +28,16 @@ export default function App() {
   const [loadingPolls, setLoadingPolls] = useState(true);
   const prevAddressRef = useRef<string | null>(null);
 
-  // Load polls from contract on mount
+  // Load polls from contract on mount and when address changes
   useEffect(() => {
     setLoadingPolls(true);
-    fetchAllPolls(CONTRACT_ID)
+    fetchAllPolls(CONTRACT_ID, address)
       .then((contractPolls) => {
         setPolls(contractPolls);
         setLoadingPolls(false);
       })
       .catch(() => setLoadingPolls(false));
-  }, []);
+  }, [address]);
 
   // When address changes, load their vote state from contract
   useEffect(() => {
@@ -50,7 +50,7 @@ export default function App() {
       const voted = new Set<string>();
       for (let i = 1; i <= count; i++) {
         try {
-          const has = await checkHasVoted(CONTRACT_ID, i, address);
+          const has = await checkHasVoted(CONTRACT_ID, i, address, address);
           if (has) voted.add(String(i));
         } catch { /* ignore */ }
       }
@@ -63,11 +63,11 @@ export default function App() {
   const refreshPoll = useCallback(async (pollId: string) => {
     const id = parseInt(pollId, 10);
     if (isNaN(id)) return;
-    const updated = await fetchPoll(CONTRACT_ID, id);
+    const updated = await fetchPoll(CONTRACT_ID, id, address);
     if (updated) {
       setPolls((prev) => prev.map((p) => (p.id === pollId ? updated : p)));
     }
-  }, []);
+  }, [address]);
 
   const handleConnect = useCallback(async (type: WalletType) => {
     await connect(type);
@@ -119,14 +119,19 @@ export default function App() {
       return;
     }
     setIsCreating(true);
-    const txHash = await createPollContract(address, CONTRACT_ID, question, options);
-    addTransaction(txHash, 'pending', `Creating poll: "${question.slice(0, 30)}..."`);
-    setIsCreating(false);
+    try {
+      const txHash = await createPollContract(address, CONTRACT_ID, question, options);
+      addTransaction(txHash, 'pending', `Creating poll: "${question.slice(0, 30)}..."`);
 
-    setTimeout(async () => {
-      const newPolls = await fetchAllPolls(CONTRACT_ID);
-      setPolls(newPolls);
-    }, 5000);
+      setTimeout(async () => {
+        const newPolls = await fetchAllPolls(CONTRACT_ID);
+        setPolls(newPolls);
+      }, 5000);
+    } catch (err: any) {
+      addTransaction('err-' + Date.now(), 'failed', err?.message || String(err));
+    } finally {
+      setIsCreating(false);
+    }
   }, [address, walletType, addTransaction]);
 
   const handleVote = useCallback(async (pollId: string, optionIndex: number) => {
@@ -141,20 +146,17 @@ export default function App() {
 
     try {
       const txHash = await voteContract(address, CONTRACT_ID, numId, optionIndex);
-      addTransaction(txHash, 'pending', `Casting vote...`);
+      addTransaction(txHash, 'pending', `Casting vote on poll #${numId}...`);
 
-      // Mark as voted locally immediately
       setVotedByAddress((prev) => {
         const s = new Set(prev[address] || []);
         s.add(pollId);
         return { ...prev, [address]: s };
       });
 
-      // Refresh poll data after a delay
       setTimeout(() => refreshPoll(pollId), 5000);
-    } catch (err) {
-      const e = getWalletError(err);
-      addTransaction('err-' + Date.now(), 'failed', e.message);
+    } catch (err: any) {
+      addTransaction('err-' + Date.now(), 'failed', err?.message || 'Vote failed');
     } finally {
       setIsVoting(null);
     }
